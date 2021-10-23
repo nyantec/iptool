@@ -1,18 +1,22 @@
 use std::io::{Error, Result};
-use std::net::IpAddr;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
-use libc::{
-    c_int, c_short, c_uchar, close, in6_addr, ioctl, sockaddr, sockaddr_in, sockaddr_in6, socket,
-};
+#[cfg(target_family = "unix")]
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
 #[cfg(feature = "pnet")]
 use pnet::datalink::MacAddr;
 
-pub const SIOCGIFINDEX: i32 = 0x8933;
+#[cfg(target_os = "linux")]
+mod linux;
+
+#[cfg(target_os = "linux")]
+pub use linux::{Ifreq, SIOCGIFINDEX};
+
+// TODO: macOS
 
 /// Only use it for a short amount of time, as it does not close it's ioctl socket
 pub struct IpTool {
+    #[cfg(target_family = "unix")]
     fd: RawFd,
 }
 
@@ -21,189 +25,6 @@ TODO: is it already non send?
 impl !Send for IpTool {}
 impl !Sync for IpTool {}
  */
-
-impl IpTool {
-    pub fn new() -> Result<Self> {
-        let fd = Self::get_ctl_fd()?;
-
-        Ok(Self { fd })
-    }
-
-    pub fn set_up(&self, dev: &str, up: bool) -> Result<()> {
-        let mut ifr = Ifreq::new(dev);
-
-        let res = unsafe { ioctl(self.fd, libc::SIOCGIFFLAGS as _, &mut ifr) };
-
-        if res < 0 {
-            return Err(last_err());
-        }
-
-        let flag_val = libc::IFF_UP as i16;
-
-        // SAFETY: union
-        unsafe {
-            ifr.ifr_ifru.ifru_flags = if up {
-                ifr.ifr_ifru.ifru_flags | flag_val
-            } else {
-                ifr.ifr_ifru.ifru_flags & (!flag_val)
-            };
-        }
-
-        let res = unsafe { ioctl(self.fd, libc::SIOCSIFFLAGS as _, &mut ifr) };
-
-        if res < 0 {
-            return Err(last_err());
-        }
-
-        if self.get_up(dev)? != up {
-            return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE));
-        }
-
-        Ok(())
-    }
-
-    pub fn get_up(&self, dev: &str) -> Result<bool> {
-        let mut ifr = Ifreq::new(dev);
-
-        let res = unsafe { ioctl(self.fd, libc::SIOCGIFFLAGS as _, &mut ifr) };
-        if res < 0 {
-            return Err(last_err());
-        }
-
-        // unions
-        let flags: i16 = unsafe { ifr.ifr_ifru.ifru_flags };
-        Ok((flags & libc::IFF_UP as i16) == 1)
-    }
-
-    pub fn set_mtu(&self, dev: &str, mtu: u32) -> Result<()> {
-        let mut ifr = Ifreq::new(dev);
-        ifr.ifr_ifru.ifru_mtu = mtu as i32;
-
-        let res = unsafe { ioctl(self.fd, libc::SIOCSIFMTU as _, &mut ifr) };
-        if res < 0 {
-            return Err(last_err());
-        }
-
-        Ok(())
-    }
-
-    pub fn get_mtu(&self, dev: &str) -> Result<u32> {
-        let mut ifr = Ifreq::new(dev);
-
-        let res = unsafe { ioctl(self.fd, libc::SIOCGIFMTU as _, &mut ifr) };
-        if res < 0 {
-            return Err(last_err());
-        }
-
-        let mtu = unsafe { ifr.ifr_ifru.ifru_mtu as u32 };
-        Ok(mtu)
-    }
-
-    pub fn get_index(&self, dev: &str) -> Result<c_int> {
-        let mut ifr = Ifreq::new(dev);
-
-        let res = unsafe { ioctl(self.fd, SIOCGIFINDEX as _, &mut ifr) };
-        if res < 0 {
-            return Err(last_err());
-        }
-
-        Ok(unsafe { ifr.ifr_ifru.ifru_ivalue })
-    }
-
-    // TODO: mut?
-    pub fn set_address(&self, dev: &str, address: &IpAddr, prefix_length: u32) -> Result<()> {
-        let index = self.get_index(dev)?;
-        let res = match address {
-            IpAddr::V4(_addr) => {
-                // TODO: ipv4
-                return Err(Error::from_raw_os_error(libc::ENOSYS));
-            }
-            IpAddr::V6(addr) => {
-                let mut ifr = Ifreq6 {
-                    prefix_length,
-                    ifindex: index as _,
-                    addr: in6_addr {
-                        s6_addr: addr.octets(),
-                    },
-                };
-                unsafe { ioctl(self.fd, libc::SIOCSIFADDR as _, &mut ifr) }
-            }
-        };
-
-        if res < 0 {
-            return Err(last_err());
-        }
-
-        Ok(())
-        //let mut ifr = Ifreq::new(dev);
-        /*match address {
-            IpAddr::V4(addr) => {
-                ifr.ifr_ifru.ifru_addr_v4.sin_family = libc::AF_INET as libc::sa_family_t;
-                ifr.ifr_ifru.ifru_addr_v4.sin_addr.s_addr = u32::from_ne_bytes(addr.octets());
-            }
-        }*/
-
-        /*let res = unsafe { libc::ioctl(self.fd, libc::SIOCSIFADDR as _, &mut ifr) };*/
-    }
-
-    pub fn get_address(&self, _dev: &str) -> Result<IpAddr> {
-        // TODO
-        Err(Error::from_raw_os_error(libc::ENOSYS))
-    }
-
-    pub fn set_mac(&self, dev: &str, mac: &str) -> Result<()> {
-        self.set_mac_sa_data(dev, parse_mac_addr(mac)?)
-    }
-    pub fn set_mac_sa_data(&self, dev: &str, mac: [libc::c_char; 14]) -> Result<()> {
-        let mut ifr = Ifreq::new(dev);
-        ifr.ifr_ifru.ifru_hwaddr.sa_family = libc::ARPHRD_ETHER;
-        ifr.ifr_ifru.ifru_hwaddr.sa_data = mac;
-
-        let res = unsafe { ioctl(self.fd, libc::SIOCSIFHWADDR as _, &mut ifr) };
-        if res < 0 {
-            return Err(last_err());
-        }
-
-        Ok(())
-    }
-
-    pub fn get_mac_sa_data(&self, dev: &str) -> Result<[libc::c_char; 14]> {
-        let mut ifr = Ifreq::new(dev);
-        ifr.ifr_ifru.ifru_hwaddr.sa_family = libc::ARPHRD_ETHER;
-
-        let res = unsafe { ioctl(self.fd, libc::SIOCGIFHWADDR as _, &mut ifr) };
-        if res < 0 {
-            return Err(last_err());
-        }
-
-        let sa_data = unsafe { ifr.ifr_ifru.ifru_hwaddr.sa_data };
-        Ok(sa_data)
-    }
-    // TODO: get_mac -> String
-
-    fn get_ctl_fd() -> Result<c_int> {
-        let fd = unsafe { socket(libc::PF_INET, libc::SOCK_DGRAM, 0) };
-        if fd >= 0 {
-            return Ok(fd);
-        }
-        let error = std::io::Error::last_os_error();
-        let fd = unsafe { socket(libc::PF_PACKET, libc::SOCK_DGRAM, 0) };
-        if fd >= 0 {
-            return Ok(fd);
-        }
-        let fd = unsafe { socket(libc::PF_INET6, libc::SOCK_DGRAM, 0) };
-        if fd >= 0 {
-            return Ok(fd);
-        }
-        Err(error)
-    }
-}
-
-impl Drop for IpTool {
-    fn drop(&mut self) {
-        unsafe { close(self.fd) };
-    }
-}
 
 impl AsRawFd for IpTool {
     fn as_raw_fd(&self) -> RawFd {
@@ -217,64 +38,9 @@ impl FromRawFd for IpTool {
     }
 }
 
-#[repr(C)]
-union IfrIfru {
-    ifru_addr: sockaddr,
-    ifru_hwaddr: sockaddr,
-    ifru_addr_v4: sockaddr_in,
-    ifru_addr_v6: sockaddr_in6,
-    ifru_dstaddr: sockaddr,
-    ifru_broadaddr: sockaddr,
-    ifru_flags: c_short,
-    ifru_metric: c_int,
-    ifru_ivalue: c_int,
-    ifru_mtu: c_int,
-    ifru_phys: c_int,
-    ifru_media: c_int,
-    ifru_intval: c_int,
-    //ifru_data: caddr_t,
-    //ifru_devmtu: ifdevmtu,
-    //ifru_kpi: ifkpi,
-    ifru_wake_flags: u32,
-    ifru_route_refcnt: u32,
-    ifru_cap: [c_int; 2],
-    ifru_functional_type: u32,
-}
-
-#[repr(C)]
-pub struct Ifreq {
-    ifr_name: [c_uchar; libc::IFNAMSIZ],
-    ifr_ifru: IfrIfru,
-}
-
-impl Ifreq {
-    pub fn new(dev: &str) -> Self {
-        //let mut ifr_name = [0; libc::IF_NAMESIZE];
-
-        //ifr_name[..dev.len()].copy_from_slice(dev.as_bytes().as_ref());
-
-        let s: [u8; core::mem::size_of::<Self>()] = [0; core::mem::size_of::<Self>()];
-        let mut s: Self = unsafe { core::mem::transmute(s) };
-
-        copy_slice(&mut s.ifr_name, dev.as_bytes());
-
-        s
-        /*Self {
-            ifr_name,
-            ifr_ifru: IfrIfru { ifru_flags: 0 },
-        }*/
-    }
-}
-
-#[repr(C)]
-struct Ifreq6 {
-    addr: in6_addr,
-    prefix_length: u32,
-    ifindex: libc::c_uint,
-}
-
 // Helper function
-fn copy_slice(dst: &mut [u8], src: &[u8]) -> usize {
+#[allow(dead_code)] // not used yet on non linux
+pub(crate) fn copy_slice(dst: &mut [u8], src: &[u8]) -> usize {
     let mut c = 0;
 
     for (d, s) in dst.iter_mut().zip(src.iter()) {
@@ -326,6 +92,7 @@ impl MacAddrLinxExt for MacAddr {
 
 #[cold]
 #[inline]
+#[allow(dead_code)] // not used yet on non linux
 /// Own (cold) function to optimize if statements
 fn last_err() -> Error {
     Error::last_os_error()
@@ -333,58 +100,6 @@ fn last_err() -> Error {
 
 #[cfg(test)]
 mod test {
-    use nix::libc;
-
-    use super::IpTool;
-    #[test]
-    #[ignore]
-    fn down() {
-        let ip_tool = IpTool::new().unwrap();
-
-        ip_tool.set_up("loop1", false).unwrap();
-    }
-
-    #[test]
-    #[ignore]
-    fn up() {
-        let ip_tool = IpTool::new().unwrap();
-
-        ip_tool.set_up("loop1", true).unwrap();
-    }
-
-    #[test]
-    #[ignore]
-    fn sleep_down_and_up() {
-        let ip_tool = IpTool::new().unwrap();
-
-        ip_tool.set_up("loop1", false).unwrap();
-
-        std::thread::sleep(std::time::Duration::from_secs(5));
-
-        ip_tool.set_up("loop1", true).unwrap();
-    }
-
-    #[test]
-    #[ignore]
-    fn mtu() {
-        let ip_tool = IpTool::new().unwrap();
-
-        ip_tool.set_mtu("loop1", 1420).unwrap();
-
-        assert_eq!(ip_tool.get_mtu("loop1").unwrap(), 1420);
-    }
-
-    #[test]
-    #[ignore]
-    fn mac() {
-        let ip_tool = IpTool::new().unwrap();
-        let mac = "5A:E6:60:8F:5F:DE";
-
-        ip_tool.set_mac("loop1", mac).unwrap();
-
-        let sa_data = ip_tool.get_mac_sa_data("loop1").unwrap();
-        assert_eq!(sa_data, super::parse_mac_addr(mac).unwrap());
-    }
 
     #[test]
     #[allow(overflowing_literals)]
@@ -402,5 +117,13 @@ mod test {
 
         // not long enough address
         super::parse_mac_addr("5A:3B:2D").unwrap_err();
+    }
+
+    #[cfg(feature = "pnet")]
+    #[test]
+    fn macaddr_from_interface() {
+        use super::MacAddrLinxExt;
+
+        assert!(pnet::util::MacAddr::from_interface("lo").unwrap().is_zero());
     }
 }
