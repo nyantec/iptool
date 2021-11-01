@@ -88,7 +88,7 @@ impl IpTool {
 
                 let mut ifr = Ifreq::new(dev);
                 ifr.ifr_ifru.ifru_addr_v4.sin_family = libc::AF_INET as _;
-                ifr.ifr_ifru.ifru_addr_v4.sin_addr.s_addr = u32::from_ne_bytes(addr.octets());
+                ifr.ifr_ifru.ifru_addr_v4.sin_addr.s_addr = (*addr).into();
 
                 ifr.ioctl(&self, libc::SIOCSIFADDR)?;
 
@@ -120,9 +120,21 @@ impl IpTool {
         /*let res = unsafe { libc::ioctl(self.fd, libc::SIOCSIFADDR as _, &mut ifr) };*/
     }
 
-    pub fn get_address(&self, _dev: &str) -> Result<IpAddr> {
-        // TODO
-        Err(Error::from_raw_os_error(libc::ENOSYS))
+    pub fn get_address(&self, dev: &str) -> Result<Ipv4Addr> {
+        let mut ifr = Ifreq::new(dev);
+
+        ifr.ioctl(&self, libc::SIOCGIFADDR)?;
+
+        // SAFETY: union
+        let addr: Ipv4Addr = unsafe {
+            if ifr.ifr_ifru.ifru_addr_v4.sin_family != libc::AF_INET as _ {
+                return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE));
+            }
+            ifr.ifr_ifru.ifru_addr_v4.sin_addr.s_addr
+        }
+        .into();
+
+        Ok(addr)
     }
 
     pub fn set_mac(&self, dev: &str, mac: &str) -> Result<()> {
@@ -307,5 +319,8 @@ mod test {
         ip_tool
             .set_address(TEST_INTERFACE, &IpAddr::V4(address), 24)
             .unwrap();
+
+        let addr_on_link = ip_tool.get_address(TEST_INTERFACE).unwrap();
+        assert_eq!(address, addr_on_link);
     }
 }
