@@ -9,6 +9,22 @@ use super::{copy_slice, last_err, parse_mac_addr, IpTool};
 
 pub const SIOCGIFINDEX: u64 = 0x8933;
 
+// Helper traits
+pub trait IpAddrLinkExt
+where
+    Self: Sized,
+{
+    fn from_interface(dev: &str) -> Result<Self>;
+}
+
+impl IpAddrLinkExt for Ipv4Addr {
+    fn from_interface(dev: &str) -> Result<Self> {
+        let iptool = IpTool::new()?;
+
+        iptool.get_address(dev)
+    }
+}
+
 impl IpTool {
     pub fn new() -> Result<Self> {
         let fd = Self::get_ctl_fd()?;
@@ -322,5 +338,16 @@ mod test {
 
         let addr_on_link = ip_tool.get_address(TEST_INTERFACE).unwrap();
         assert_eq!(address, addr_on_link);
+    }
+
+    #[test]
+    #[ignore]
+    fn ipv4addr_link_ext() {
+        use super::IpAddrLinkExt;
+        let address: Ipv4Addr = "10.23.42.1".parse().unwrap();
+
+        let addr_if = Ipv4Addr::from_interface(TEST_INTERFACE).unwrap();
+
+        assert_eq!(address, addr_if);
     }
 }
