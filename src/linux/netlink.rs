@@ -6,7 +6,7 @@ use std::sync::{Mutex, TryLockError};
 use log::warn;
 use neli::attr::{AttrHandle, AttrHandleMut};
 use neli::consts::nl::{NlTypeWrapper, NlmF, NlmFFlags, Nlmsg};
-use neli::consts::rtnl::{Arphrd, IffFlags, Ifla, RtAddrFamily, Rtm};
+use neli::consts::rtnl::{Arphrd, IffFlags, Ifla, IflaInfo, RtAddrFamily, Rtm};
 use neli::consts::socket::NlFamily;
 use neli::err::NlError;
 use neli::nl::{NlPayload, Nlmsghdr};
@@ -152,8 +152,7 @@ impl RTNetlink {
         };
 
         let socket = unsafe { &mut *self.handle.get() };
-        socket.send(nlhdr);
-
+        socket.send(nlhdr)?;
         /*let ret = for nl in socket.iter(false) {
             let nl: Nlmsghdr<NlTypeWrapper, Ifinfomsg> = nl?;
 
@@ -176,7 +175,51 @@ impl RTNetlink {
             return Ok(Interface(payload));
         }
 
-        unreachable!("should not happen")
+        todo!("no ack returned")
+    }
+
+    pub fn create_interface(&self, interface: Interface) -> Result<(), NlError> {
+        let mut seq = self
+            .seq
+            .lock()
+            .map_err(|_| Error::from_raw_os_error(libc::ENOTRECOVERABLE))?;
+
+        let nlhdr = {
+            let len = None;
+            let nl_type = Rtm::Newlink;
+            let flag = NlmFFlags::new(&[NlmF::Request, NlmF::Ack, NlmF::Match, NlmF::Atomic]);
+            let seq = Some(*seq);
+            let pid = Some(Pid::this().as_raw() as _);
+            Nlmsghdr::new(
+                len,
+                nl_type,
+                flag,
+                seq,
+                pid,
+                NlPayload::Payload(interface.0),
+            )
+        };
+
+        let socket = unsafe { &mut *self.handle.get() };
+        socket.send(nlhdr)?;
+
+        if let Some(ret) = socket.recv()? {
+            let ret: Nlmsghdr<NlTypeWrapper, Ifinfomsg> = ret;
+
+            if let NlPayload::Ack(_) = ret.nl_payload {
+                if ret.nl_seq != *seq {
+                    todo!("seq not valid")
+                }
+            } else {
+                todo!("Not an ack")
+            }
+        } else {
+            todo!("No ack returned")
+        }
+
+        *seq += 1;
+
+        Ok(())
     }
 }
 
@@ -186,6 +229,25 @@ pub struct Interface(pub Ifinfomsg);
 
 type AttrHandleInterface<'a> = AttrHandle<'a, RtBuffer<Ifla, Buffer>, Rtattr<Ifla, Buffer>>;
 impl Interface {
+    /// Create new interface from with type
+    pub fn new_with_type(kind: &str) -> Result<Self, NlError> {
+        let mut attrs = RtBuffer::new();
+        let mut linkinfo = Rtattr::new(None, Ifla::Linkinfo, Vec::<u8>::new())?;
+        linkinfo.add_nested_attribute(&Rtattr::new(None, IflaInfo::Kind, kind)?);
+        attrs.push(linkinfo);
+
+        let msg = Ifinfomsg::new(
+            RtAddrFamily::Unspecified,
+            Arphrd::Netrom,
+            0,
+            IffFlags::new(&[]),
+            IffFlags::new(&[]),
+            attrs,
+        );
+
+        Ok(Self(msg))
+    }
+
     pub fn get_attr_handle(&self) -> AttrHandleInterface {
         self.0.rtattrs.get_attr_handle()
     }
@@ -210,6 +272,7 @@ impl Interface {
 
 #[cfg(test)]
 mod test {
+    use super::Interface;
     use super::RTNetlink;
 
     lazy_static::lazy_static! {
@@ -230,5 +293,12 @@ mod test {
     fn get_interface_lo() {
         let interface = HANDLE.get_interface("lo").unwrap();
         assert_eq!("lo", interface.get_if_name().unwrap());
+    }
+
+    #[test]
+    fn create_dummy() {
+        HANDLE
+            .create_interface(Interface::new_with_type("dummy").unwrap())
+            .unwrap();
     }
 }
