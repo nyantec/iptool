@@ -1,3 +1,6 @@
+#[cfg(feature = "rtnetlink")]
+pub(crate) mod netlink;
+
 use std::io::{Error, Result};
 use std::net::{IpAddr, Ipv4Addr};
 
