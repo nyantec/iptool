@@ -21,6 +21,8 @@ pub struct RTNetlink {
     seq: Mutex<u32>,
 }
 
+unsafe impl Sync for RTNetlink {}
+
 impl RTNetlink {
     pub fn new() -> IoResult<Self> {
         let handle =
@@ -121,6 +123,61 @@ impl RTNetlink {
 
         Ok(ret)
     }
+
+    pub fn get_interface(&self, dev: &str) -> Result<Interface, NlError> {
+        let mut seq = self
+            .seq
+            .lock()
+            .map_err(|_| Error::from_raw_os_error(libc::ENOTRECOVERABLE))?;
+
+        let mut attrs = RtBuffer::new();
+        attrs.push(Rtattr::new(None, Ifla::Ifname, dev)?);
+        attrs.push(Rtattr::new(None, Ifla::ExtMask, 0x01000000u32)?);
+
+        let nlhdr = {
+            let len = None;
+            let nl_type = Rtm::Getlink;
+            let flag = NlmFFlags::new(&[NlmF::Request]);
+            let seq = Some(*seq);
+            let pid = Some(Pid::this().as_raw() as _);
+            let payload = Ifinfomsg::new(
+                RtAddrFamily::Unspecified,
+                Arphrd::Netrom,
+                0,
+                IffFlags::new(&[]),
+                IffFlags::new(&[]),
+                attrs,
+            );
+            Nlmsghdr::new(len, nl_type, flag, seq, pid, NlPayload::Payload(payload))
+        };
+
+        let socket = unsafe { &mut *self.handle.get() };
+        socket.send(nlhdr);
+
+        /*let ret = for nl in socket.iter(false) {
+            let nl: Nlmsghdr<NlTypeWrapper, Ifinfomsg> = nl?;
+
+
+        }*/
+        if let Some(ret) = socket.recv()? {
+            let ret: Nlmsghdr<NlTypeWrapper, Ifinfomsg> = ret;
+
+            if ret.nl_seq != *seq {
+                warn!("Sequence not correct");
+                return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE).into());
+            }
+
+            let payload = match ret.nl_payload {
+                NlPayload::Payload(p) => p,
+                NlPayload::Err(e) => return Err(e.into()),
+                _ => return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE).into()),
+            };
+
+            return Ok(Interface(payload));
+        }
+
+        unreachable!("should not happen")
+    }
 }
 
 // -- Interface --
@@ -155,14 +212,23 @@ impl Interface {
 mod test {
     use super::RTNetlink;
 
+    lazy_static::lazy_static! {
+        static ref HANDLE: RTNetlink = RTNetlink::new().unwrap();
+    }
+
     #[test]
     fn get_interfaces() {
-        let mut rtnetlink = RTNetlink::new().unwrap();
-
-        let interfaces = rtnetlink.get_interfaces().unwrap();
+        let interfaces = HANDLE.get_interfaces().unwrap();
         assert!(interfaces.len() > 0);
 
         let lo = &interfaces[0];
+        assert_eq!("lo", lo.get_if_name().unwrap());
         println!("{:?}", lo.get_if_name());
+    }
+
+    #[test]
+    fn get_interface_lo() {
+        let interface = HANDLE.get_interface("lo").unwrap();
+        assert_eq!("lo", interface.get_if_name().unwrap());
     }
 }
