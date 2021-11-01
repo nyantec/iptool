@@ -70,6 +70,7 @@ pub fn parse_mac_addr(mac: &str) -> Result<[libc::c_char; 14]> {
     Ok(addr)
 }
 
+// Ext traits
 #[cfg(feature = "pnet")]
 pub trait MacAddrLinxExt: From<[u8; 6]> {
     fn from_interface(interface: &str) -> Result<Self>;
@@ -89,6 +90,9 @@ impl MacAddrLinxExt for MacAddr {
         Ok(hwaddr.into())
     }
 }
+
+#[cfg(target_os = "linux")]
+pub use linux::IpAddrLinkExt;
 
 #[cold]
 #[inline]
