@@ -296,6 +296,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn create_dummy() {
         HANDLE
             .create_interface(Interface::new_with_type("dummy").unwrap())

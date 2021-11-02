@@ -13,16 +13,38 @@
           cargoBuildFlags = [ "--all-features" ];
         }
       ) {};
+      iptool-tests = final.iptool.overrideAttrs (old: {
+        name = "iptool-test-binaries";
+        nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ final.perl ];
+
+        cargoBuildFlags = (old.cargoBuildFlags or []) ++ [ "--tests" ];
+
+        installPhase = ''
+          find target -type f -executable -regex ".*-[0-9a-f]+" \
+            | sed 's#\(.*\)/\([^/]*\)-\([0-9a-f]\+\)#install -Dm755 \1/\2-\3 \$out/bin/\2-test#' \
+            | sh
+        '';
+      });
+
     };
-    pkgs = import nixpkgs {
-      system = "x86_64-linux";
-      overlays = [ overlay ];
-    };
+    systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+
+    forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
+
+    nixpkgsFor = forAllSystems (system:
+      import nixpkgs {
+        inherit system;
+        overlays = [ overlay ];
+    });
   in {
     inherit overlay;
-    packages.x86_64-linux = {
-      inherit (pkgs) iptool;
+    packages = forAllSystems (system: { inherit (nixpkgsFor.${system}) iptool iptool-tests; });
+
+    defaultPackage = forAllSystems (system: self.packages.${system}.iptool);
+
+    hydraJobs = {
+      ioctl.x86_64-linux = import ./nix/tests/ioctl-unittests { pkgs = nixpkgsFor.x86_64-linux; system = "x86_64-linux";  };
+      netlink.x86_64-linux = import ./nix/tests/netlink-unittests { pkgs = nixpkgsFor.x86_64-linux; system = "x86_64-linux";  };
     };
-    defaultPackage.x86_64-linux = self.packages.x86_64-linux.iptool;
   };
 }
