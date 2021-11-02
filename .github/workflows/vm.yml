@@ -1,0 +1,34 @@
+name: "Build"
+on:
+  pull_request:
+  push:
+jobs:
+  ioctl:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2.3.4
+    - uses: cachix/install-nix-action@v13
+      with:
+        nix_path: ""
+        install_url: "https://releases.nixos.org/nix/nix-2.4/install"
+    - uses: cachix/cachix-action@v10
+      with:
+        name: nyantec
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+    - run: nix build --extra-experimental-features flakes --experimental-features "nix-command flakes".#hydraJobs.ioctl.x86_64-linux -L
+  netlink:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2.3.4
+    - uses: cachix/install-nix-action@v13
+      with:
+        nix_path: ""
+        install_url: "https://releases.nixos.org/nix/nix-2.4/install"
+    - uses: cachix/cachix-action@v10
+      with:
+        name: nyantec
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+    - run: nix build --extra-experimental-features flakes --experimental-features "nix-command flakes" .#hydraJobs.netlink.x86_64-linux -L
+    - uses: actions/upload-artifact@v2
+      with:
+        path: result*/**/*
