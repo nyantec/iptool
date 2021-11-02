@@ -41,5 +41,9 @@
     packages = forAllSystems (system: { inherit (nixpkgsFor.${system}) iptool iptool-tests; });
 
     defaultPackage = forAllSystems (system: self.packages.${system}.iptool);
+
+    hydraJobs = {
+      ioctl.x86_64-linux = import ./nix/tests/ioctl-unittests { pkgs = nixpkgsFor.x86_64-linux; system = "x86_64-linux";  };
+    };
   };
 }
