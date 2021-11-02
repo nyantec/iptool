@@ -44,6 +44,7 @@
 
     hydraJobs = {
       ioctl.x86_64-linux = import ./nix/tests/ioctl-unittests { pkgs = nixpkgsFor.x86_64-linux; system = "x86_64-linux";  };
+      netlink.x86_64-linux = import ./nix/tests/netlink-unittests { pkgs = nixpkgsFor.x86_64-linux; system = "x86_64-linux";  };
     };
   };
 }
