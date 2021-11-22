@@ -1,0 +1,26 @@
+name: "Hydra"
+on:
+  pull_request:
+  push:
+jobs:
+  ioctl:
+    runs-on: self-hosted
+    steps:
+    - uses: actions/checkout@v2.3.4
+    - env:
+        CACHIX_AUTH_TOKEN: '${{ secrets.CACHIX_AUTH_TOKEN  }}'
+      run: |
+        nix-shell -p nix cachix -I nixpkgs=channel:nixos-unstable \
+          --run 'nix --extra-experimental-features flakes --experimental-features "nix-command flakes" build .#hydraJobs.ioctl.x86_64-linux -L && cachix push nyantec ./result'
+  netlink:
+    runs-on: self-hosted
+    steps:
+    - uses: actions/checkout@v2.3.4
+    - env:
+        CACHIX_AUTH_TOKEN: '${{ secrets.CACHIX_AUTH_TOKEN  }}'
+      run: |
+        nix-shell -p nix cachix -I nixpkgs=channel:nixos-unstable \
+          --run 'nix --extra-experimental-features flakes --experimental-features "nix-command flakes" build .#hydraJobs.netlink.x86_64-linux -L && cachix push nyantec ./result'
+    - uses: actions/upload-artifact@v2
+      with:
+        path: result*/**/*
