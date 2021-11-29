@@ -35,7 +35,7 @@ impl IpTool {
     pub fn set_up(&self, dev: &str, up: bool) -> Result<()> {
         let mut ifr = Ifreq::new(dev);
 
-        ifr.ioctl(&self, libc::SIOCGIFFLAGS)?;
+        ifr.ioctl(&self, libc::SIOCGIFFLAGS as _)?;
 
         let flag_val = libc::IFF_UP as i16;
 
@@ -48,7 +48,7 @@ impl IpTool {
             };
         }
 
-        ifr.ioctl(&self, libc::SIOCSIFFLAGS)?;
+        ifr.ioctl(&self, libc::SIOCSIFFLAGS as _)?;
 
         if self.get_up(dev)? != up {
             return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE));
@@ -60,7 +60,7 @@ impl IpTool {
     pub fn get_up(&self, dev: &str) -> Result<bool> {
         let mut ifr = Ifreq::new(dev);
 
-        ifr.ioctl(&self, libc::SIOCGIFFLAGS)?;
+        ifr.ioctl(&self, libc::SIOCGIFFLAGS as _)?;
 
         // unions
         let flags: i16 = unsafe { ifr.ifr_ifru.ifru_flags };
@@ -71,7 +71,7 @@ impl IpTool {
         let mut ifr = Ifreq::new(dev);
         ifr.ifr_ifru.ifru_mtu = mtu as i32;
 
-        ifr.ioctl(&self, libc::SIOCSIFMTU)?;
+        ifr.ioctl(&self, libc::SIOCSIFMTU as _)?;
 
         Ok(())
     }
@@ -79,7 +79,7 @@ impl IpTool {
     pub fn get_mtu(&self, dev: &str) -> Result<u32> {
         let mut ifr = Ifreq::new(dev);
 
-        ifr.ioctl(&self, libc::SIOCGIFMTU)?;
+        ifr.ioctl(&self, libc::SIOCGIFMTU as _)?;
 
         let mtu = unsafe { ifr.ifr_ifru.ifru_mtu as u32 };
         Ok(mtu)
@@ -88,7 +88,7 @@ impl IpTool {
     pub fn get_index(&self, dev: &str) -> Result<c_int> {
         let mut ifr = Ifreq::new(dev);
 
-        ifr.ioctl(&self, SIOCGIFINDEX)?;
+        ifr.ioctl(&self, SIOCGIFINDEX as _)?;
 
         Ok(unsafe { ifr.ifr_ifru.ifru_ivalue })
     }
@@ -106,11 +106,11 @@ impl IpTool {
                 ifr.ifr_ifru.ifru_addr_v4.sin_family = libc::AF_INET as _;
                 ifr.ifr_ifru.ifru_addr_v4.sin_addr.s_addr = (*addr).into();
 
-                ifr.ioctl(&self, libc::SIOCSIFADDR)?;
+                ifr.ioctl(&self, libc::SIOCSIFADDR as _)?;
 
                 ifr.ifr_ifru.ifru_addr_v4.sin_addr.s_addr = u32::MAX >> (32 - prefix_length);
 
-                ifr.ioctl(&self, libc::SIOCSIFNETMASK)?;
+                ifr.ioctl(&self, libc::SIOCSIFNETMASK as _)?;
             }
             IpAddr::V6(addr) => {
                 let mut ifr = Ifreq6 {
@@ -120,7 +120,7 @@ impl IpTool {
                         s6_addr: addr.octets(),
                     },
                 };
-                ifr.ioctl(&self, libc::SIOCSIFADDR)?;
+                ifr.ioctl(&self, libc::SIOCSIFADDR as _)?;
             }
         }
 
@@ -139,7 +139,7 @@ impl IpTool {
     pub fn get_address(&self, dev: &str) -> Result<Ipv4Addr> {
         let mut ifr = Ifreq::new(dev);
 
-        ifr.ioctl(&self, libc::SIOCGIFADDR)?;
+        ifr.ioctl(&self, libc::SIOCGIFADDR as _)?;
 
         // SAFETY: union
         let addr: Ipv4Addr = unsafe {
@@ -161,14 +161,14 @@ impl IpTool {
         ifr.ifr_ifru.ifru_hwaddr.sa_family = libc::ARPHRD_ETHER;
         ifr.ifr_ifru.ifru_hwaddr.sa_data = mac;
 
-        ifr.ioctl(&self, libc::SIOCSIFHWADDR)
+        ifr.ioctl(&self, libc::SIOCSIFHWADDR as _)
     }
 
     pub fn get_mac_sa_data(&self, dev: &str) -> Result<[libc::c_char; 14]> {
         let mut ifr = Ifreq::new(dev);
         ifr.ifr_ifru.ifru_hwaddr.sa_family = libc::ARPHRD_ETHER;
 
-        ifr.ioctl(&self, libc::SIOCGIFHWADDR)?;
+        ifr.ioctl(&self, libc::SIOCGIFHWADDR as _)?;
 
         let sa_data = unsafe { ifr.ifr_ifru.ifru_hwaddr.sa_data };
         Ok(sa_data)
@@ -179,7 +179,7 @@ impl IpTool {
     pub fn get_arptype(&self, dev: &str) -> Result<libc::sa_family_t> {
         let mut ifr = Ifreq::new(dev);
 
-        ifr.ioctl(&self, libc::SIOCGIFHWADDR)?;
+        ifr.ioctl(&self, libc::SIOCGIFHWADDR as _)?;
 
         let arptype = unsafe { ifr.ifr_ifru.ifru_hwaddr.sa_family };
         return Ok(arptype);
