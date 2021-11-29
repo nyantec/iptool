@@ -12,6 +12,9 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{Ifreq, SIOCGIFINDEX};
 
+#[cfg(all(target_os = "linux", feature = "rtnetlink"))]
+pub use linux::netlink::RTNetlink;
+
 // TODO: macOS
 
 /// Only use it for a short amount of time, as it does not close it's ioctl socket
