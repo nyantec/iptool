@@ -302,4 +302,12 @@ mod test {
             .create_interface(Interface::new_with_type("dummy").unwrap())
             .unwrap();
     }
+
+    #[test]
+    #[ignore]
+    fn create_veth() {
+        HANDLE
+            .create_interface(Interface::new_with_type("veth").unwrap())
+            .unwrap();
+    }
 }
