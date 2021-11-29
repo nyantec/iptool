@@ -175,6 +175,16 @@ impl IpTool {
     }
     // TODO: get_mac -> String
 
+    /// Get the hardware type of the given interface
+    pub fn get_arptype(&self, dev: &str) -> Result<libc::sa_family_t> {
+        let mut ifr = Ifreq::new(dev);
+
+        ifr.ioctl(&self, libc::SIOCGIFHWADDR)?;
+
+        let arptype = unsafe { ifr.ifr_ifru.ifru_hwaddr.sa_family };
+        return Ok(arptype);
+    }
+
     fn get_ctl_fd() -> Result<c_int> {
         let fd = unsafe { socket(libc::PF_INET, libc::SOCK_DGRAM, 0) };
         if fd >= 0 {
@@ -349,5 +359,12 @@ mod test {
         let addr_if = Ipv4Addr::from_interface(TEST_INTERFACE).unwrap();
 
         assert_eq!(address, addr_if);
+    }
+
+    #[test]
+    fn get_arptype() {
+        let iptool = IpTool::new().unwrap();
+        let arptype = iptool.get_arptype("lo").unwrap();
+        assert_eq!(arptype, libc::ARPHRD_LOOPBACK);
     }
 }
