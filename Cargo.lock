@@ -42,6 +42,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "either"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
+
+[[package]]
 name = "glob"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -64,6 +70,7 @@ dependencies = [
  "libc",
  "log",
  "neli",
+ "neli-proc-macros 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nix",
  "pnet",
 ]
@@ -106,12 +113,38 @@ dependencies = [
 
 [[package]]
 name = "neli"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9053554eb5dcb7e10d9cdab1206965bde870eed5d0d341532ca035e3ba221508"
+version = "0.6.0"
+source = "git+https://github.com/nyantec/neli?branch=nyantec-fixes#0027609e43a51b7567c95c5c7e9a5d9894835990"
 dependencies = [
  "byteorder",
  "libc",
+ "log",
+ "neli-proc-macros 0.1.0 (git+https://github.com/nyantec/neli?branch=nyantec-fixes)",
+]
+
+[[package]]
+name = "neli-proc-macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e95edae75d08ea3bedeab6584c8efcde3ed21a6b5dd24dced0814efacefcde11"
+dependencies = [
+ "either",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn",
+]
+
+[[package]]
+name = "neli-proc-macros"
+version = "0.1.0"
+source = "git+https://github.com/nyantec/neli?branch=nyantec-fixes#0027609e43a51b7567c95c5c7e9a5d9894835990"
+dependencies = [
+ "either",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn",
 ]
 
 [[package]]
@@ -255,6 +288,20 @@ name = "serde"
 version = "1.0.130"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f12d06de37cf59146fbdecab66aa99f9fe4f78722e3607577a5375d66bd0c913"
+dependencies = [
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.130"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7bc1a1ab1961464eae040d96713baa5a724a8152c1222492465b54322ec508b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "syn"
