@@ -3,9 +3,6 @@ use std::io::{Error, Result};
 #[cfg(target_family = "unix")]
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
-#[cfg(feature = "pnet")]
-use pnet::datalink::MacAddr;
-
 #[cfg(target_os = "linux")]
 mod linux;
 
@@ -13,7 +10,7 @@ mod linux;
 pub use linux::{Ifreq, SIOCGIFINDEX};
 
 #[cfg(all(target_os = "linux", feature = "rtnetlink"))]
-pub use linux::netlink::RTNetlink;
+pub use linux::netlink::{Interface, RTNetlink};
 
 // TODO: macOS
 
@@ -93,9 +90,6 @@ impl MacAddrLinxExt for MacAddr {
         Ok(hwaddr.into())
     }
 }
-
-#[cfg(target_os = "linux")]
-pub use linux::IpAddrLinkExt;
 
 #[cold]
 #[inline]

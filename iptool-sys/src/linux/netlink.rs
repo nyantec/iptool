@@ -365,7 +365,7 @@ impl Interface {
 
     // static helpers
     pub fn get_if_name_handle(attr_handle: &AttrHandleInterface) -> Result<String, NlError> {
-        let name = attr_handle.get_attr_payload_as::<String>(Ifla::Ifname)?;
+        let name = attr_handle.get_attr_payload_as_with_len::<String>(Ifla::Ifname)?;
         Ok(name)
     }
 }

@@ -12,22 +12,6 @@ use super::{copy_slice, last_err, parse_mac_addr, IpTool};
 
 pub const SIOCGIFINDEX: u64 = 0x8933;
 
-// Helper traits
-pub trait IpAddrLinkExt
-where
-    Self: Sized,
-{
-    fn from_interface(dev: &str) -> Result<Self>;
-}
-
-impl IpAddrLinkExt for Ipv4Addr {
-    fn from_interface(dev: &str) -> Result<Self> {
-        let iptool = IpTool::new()?;
-
-        iptool.get_address(dev)
-    }
-}
-
 impl IpTool {
     pub fn new() -> Result<Self> {
         let fd = Self::get_ctl_fd()?;
@@ -175,6 +159,16 @@ impl IpTool {
 
         let sa_data = unsafe { ifr.ifr_ifru.ifru_hwaddr.sa_data };
         Ok(sa_data)
+    }
+
+    pub fn get_mac_data(&self, dev: &str) -> Result<[u8; 6]> {
+        let hwaddr = self.get_mac_sa_data(dev);
+
+        let hwaddr = unsafe { *(&hwaddr as *const _ as *const [u8; 6]) };
+
+        let hwaddr: [u8; 6] = hwaddr.into();
+
+        Ok(hwaddr)
     }
     // TODO: get_mac -> String
 
