@@ -88,7 +88,7 @@ impl Interface {
 
         if let Ok(netns) = handle.get_attr_payload_as::<u32>(Ifla::LinkNetnsid) {
             // TODO: read name
-            addresses.push(format!("link-netnsid {}", netns));
+            addresses.push(format!("link-netns {}", netns));
         }
 
         Ok(format!(
@@ -133,6 +133,7 @@ fn group_to_name(group: u32) -> &'static str {
 fn state_to_name(state: u8) -> &'static str {
     match state {
         2 => "DOWN",
+        6 => "UP",
         // TODO: add more states
         _ => "UNKNOWN",
     }
