@@ -2,11 +2,6 @@ use anyhow::{anyhow, bail, Result};
 use clap::{App, Arg, ArgMatches};
 use iptool::links::LinkTool;
 use iptool::IpTool;
-use std::ffi::{CStr, CString};
-use std::path::PathBuf;
-
-// TODO: move to netns module
-pub(crate) const IP_NETNS_PATH: &'static str = "/var/run/netns";
 
 fn dev() -> Arg<'static> {
     Arg::new("dev").long("dev").takes_value(true)
@@ -22,7 +17,12 @@ pub(crate) fn app() -> App<'static> {
                 .about("Show links")
                 .arg(dev())
                 .arg(Arg::new("grep").long("grep").short('g').takes_value(true))
-                .arg(Arg::new("netns").long("netns").long("ns").takes_value(true)),
+                .arg(
+                    Arg::new("netns")
+                        .long("netns")
+                        .alias("ns")
+                        .takes_value(true),
+                ),
         )
         .subcommand(
             App::new("set")
@@ -37,7 +37,6 @@ pub(crate) fn app() -> App<'static> {
                 .about("Delete links")
                 .arg(dev().required(true)),
         )
-        .subcommand(App::new("exec").arg(Arg::new("netns").takes_value(true).required(true)))
 }
 
 pub fn link(sub_matches: &ArgMatches) -> Result<()> {
@@ -46,7 +45,6 @@ pub fn link(sub_matches: &ArgMatches) -> Result<()> {
         Some(("show", matches)) => list_links(matches, true),
         Some(("set", matches)) => set_link(matches),
         Some(("delete", matches)) => del_link(matches),
-        Some(("exec", matches)) => exec(matches),
         _ => todo!(),
     }
 }
@@ -64,22 +62,18 @@ fn list_links(sub_matches: &ArgMatches, has_name: bool) -> Result<()> {
     };
     let tool = LinkTool::new()?;
 
-    let nsid = if has_name {
-        if let Some(name) = sub_matches.value_of("netns") {
-            let mut path = PathBuf::from(IP_NETNS_PATH);
-            path.push(name);
-
-            let tool = unsafe { tool.get_inner() };
-            let id = tool
-                .get_nsid_path(&path)?
-                .ok_or_else(|| anyhow!("No registered network namespace found for {}", name))?;
-            Some(id)
+    let nsid =
+        if has_name {
+            if let Some(name) = sub_matches.value_of("netns") {
+                Some(crate::netns::get_named_nsid(&tool, name)?.ok_or_else(|| {
+                    anyhow!("No registered network namespace found for '{}'", name)
+                })?)
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
-    };
+        };
 
     if let Some(dev) = dev {
         //let interface = tool.get_interface(dev)?;
@@ -140,23 +134,5 @@ fn del_link(sub_matches: &ArgMatches) -> Result<()> {
 
     tool.delete_interface(tool.get_interface(dev)?)?;
 
-    Ok(())
-}
-
-// TODO: move netns namespace
-fn exec(sub_matches: &ArgMatches) -> Result<()> {
-    let netns = sub_matches.value_of("netns").unwrap();
-
-    let mut tool = LinkTool::new()?;
-
-    println!("entering ns: {}", netns);
-    let mut path = PathBuf::from(IP_NETNS_PATH);
-    path.push(netns);
-    // SAFETY: execving own process, nothing depends on the current `unshare` state
-    unsafe { tool.enter_ns_path(&path) }?;
-
-    //nix::unistd::execv(CString::try_from("/bin/sh".to_owned())?.as_c_str(), &[]);
-    let bash = CString::new("/bin/sh")?;
-    nix::unistd::execv::<&CStr>(bash.as_c_str(), &[])?;
     Ok(())
 }

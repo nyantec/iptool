@@ -1,6 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
-mod link;
+pub mod link;
+pub mod netns;
 
 use anyhow::Result;
 use clap::{App, AppSettings, ColorChoice};
@@ -13,6 +14,7 @@ fn build_app() -> App<'static> {
         //.setting(AppSettings::AllowExternalSubcommands) // TODO: yeah?
         //.setting(AppSettings::AllowInvalidUtf8ForExternalSubcommands)
         .subcommand(link::app())
+        .subcommand(netns::app())
 }
 
 fn main() -> Result<()> {
@@ -22,6 +24,7 @@ fn main() -> Result<()> {
 
     match matches.subcommand() {
         Some(("link", sub_matches)) => link::link(sub_matches),
+        Some(("netns", sub_matches)) => netns::netns(sub_matches),
         _ => unreachable!(),
     }
 }
