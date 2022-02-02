@@ -1,5 +1,4 @@
-use std::io::{Error, Result};
-use std::os::unix::io::RawFd;
+use std::io::Result;
 use std::path::Path;
 
 #[cfg(target_os = "linux")]

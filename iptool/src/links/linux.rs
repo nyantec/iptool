@@ -1,6 +1,4 @@
 use nix::fcntl::{self, OFlag};
-use std::any::Any;
-use std::ffi::CString;
 use std::io::{Error, ErrorKind, Result};
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
@@ -64,7 +62,7 @@ impl LinkTool {
 
         nix::unistd::close(ns_file)?;
 
-        sched::unshare(sched::CloneFlags::CLONE_NEWNS);
+        sched::unshare(sched::CloneFlags::CLONE_NEWNS)?;
 
         self.netns_path = Some(path.to_path_buf());
 
@@ -84,7 +82,7 @@ impl LinkTool {
 
         let id = self.get_nsid_fd(ns_file)?;
 
-        nix::unistd::close(ns_file);
+        nix::unistd::close(ns_file)?;
         Ok(id)
     }
 
@@ -180,8 +178,6 @@ impl TryFrom<iptool_sys::Interface> for Interface {
     }
 }
 
-use crate::IpTool;
-
 fn nl_error_to_io<T, P>(error: NlError<T, P>) -> Error {
     match error {
         NlError::Nlmsgerr(e) => Error::from_raw_os_error(-e.error),
@@ -189,7 +185,7 @@ fn nl_error_to_io<T, P>(error: NlError<T, P>) -> Error {
             eprint!("could not translate error: {}", e);
             Error::from(ErrorKind::UnexpectedEof)
         }
-        e => {
+        _e => {
             // FIXME: logger
             Error::from(ErrorKind::Other)
         }

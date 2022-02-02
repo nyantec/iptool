@@ -1,8 +1,9 @@
+#![deny(unsafe_op_in_unsafe_fn)]
+
 mod link;
 
 use anyhow::Result;
-use clap::{App, AppSettings, ColorChoice, Values};
-use std::collections::HashMap;
+use clap::{App, AppSettings, ColorChoice};
 
 fn build_app() -> App<'static> {
     App::new("iprs")

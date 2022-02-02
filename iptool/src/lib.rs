@@ -1,7 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use std::io::{Error, Result};
-use std::net::{IpAddr, Ipv4Addr};
+use std::io::Result;
+use std::net::Ipv4Addr;
 
 mod iptool;
 

@@ -1,5 +1,3 @@
-use libc::wchar_t;
-use std::borrow::Cow;
 use std::io::Error;
 use std::io::Result as IoResult;
 use std::os::unix::io::RawFd;
@@ -17,6 +15,16 @@ use neli::socket::NlSocketHandle;
 use neli::types::{Buffer, RtBuffer};
 use neli::{FromBytesWithInput, Header};
 use nix::unistd::Pid;
+
+macro_rules! get_payload {
+    ($payload:expr) => {
+        match $payload {
+            NlPayload::Payload(p) => p,
+            NlPayload::Err(e) => return Err(e.into()),
+            _ => return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE).into()),
+        }
+    };
+}
 
 pub struct RTNetlink {
     handle: std::cell::UnsafeCell<NlSocketHandle>,
@@ -68,6 +76,7 @@ impl RTNetlink {
     }
 
     // -- Network Namspace --
+    /// Get the network namespace id for the namespace referred to by `fd`
     pub fn get_nsid_fd(&self, fd: RawFd) -> Result<Option<i32>, NlError<NlTypeWrapper, Netns>> {
         let mut seq = self
             .seq
@@ -84,20 +93,7 @@ impl RTNetlink {
             let flag = NlmFFlags::new(&[NlmF::Request]);
             let seq = Some(*seq);
             let pid = Some(Pid::this().as_raw() as _);
-            /*let payload = Ifinfomsg::new(
-                RtAddrFamily::Unspecified,
-                Arphrd::Netrom,
-                0,
-                IffFlags::new(&[]),
-                IffFlags::new(&[]),
-                attrs,
-            );
-            let payload = Netns {
-                rtgen_family: RtAddrFamily::Unspecified,
-                rtattrs: attrs,
-            };*/
             let payload = Netns::new(RtAddrFamily::Unspecified, attrs);
-            use neli::Size;
 
             Nlmsghdr::new(len, nl_type, flag, seq, pid, NlPayload::Payload(payload))
         };
@@ -105,7 +101,7 @@ impl RTNetlink {
         let socket = unsafe { &mut *self.handle.get() };
         socket.send(nlhdr)?;
 
-        if let Some(ret) = socket.recv()? {
+        let id = if let Some(ret) = socket.recv()? {
             let ret: Nlmsghdr<NlTypeWrapper, Netns> = ret;
 
             if ret.nl_seq != *seq {
@@ -113,11 +109,7 @@ impl RTNetlink {
                 return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE).into());
             }
 
-            let payload = match ret.nl_payload {
-                NlPayload::Payload(p) => p,
-                NlPayload::Err(e) => return Err(e.into()),
-                _ => return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE).into()),
-            };
+            let payload = get_payload!(ret.nl_payload);
 
             let id = payload
                 .rtattrs
@@ -125,12 +117,15 @@ impl RTNetlink {
                 .get_attr_payload_as(NetNSA::NSid)?;
 
             if id < 0 {
-                return Ok(None);
+                None
+            } else {
+                Some(id)
             }
-            return Ok(Some(id));
-        }
+        } else {
+            return Err(NlError::NoAck);
+        };
 
-        todo!("no ack returned")
+        Ok(id)
     }
 
     // -- Interfaces --
@@ -167,7 +162,7 @@ impl RTNetlink {
         };
 
         let socket = unsafe { &mut *self.handle.get() };
-        socket.send(nlhdr);
+        socket.send(nlhdr)?;
 
         let mut ret = Vec::new();
 
@@ -183,11 +178,7 @@ impl RTNetlink {
                 break;
             }
 
-            let payload = match nl.nl_payload {
-                NlPayload::Payload(p) => p,
-                NlPayload::Err(e) => return Err(e.into()),
-                _ => return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE).into()),
-            };
+            let payload = get_payload!(nl.nl_payload);
 
             ret.push(Interface(payload))
         }
@@ -243,16 +234,12 @@ impl RTNetlink {
                 return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE).into());
             }
 
-            let payload = match ret.nl_payload {
-                NlPayload::Payload(p) => p,
-                NlPayload::Err(e) => return Err(e.into()),
-                _ => return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE).into()),
-            };
+            let payload = get_payload!(ret.nl_payload);
 
             return Ok(Interface(payload));
         }
 
-        todo!("no ack returned")
+        return Err(NlError::NoAck);
     }
 
     pub fn create_interface(
@@ -288,14 +275,14 @@ impl RTNetlink {
 
             if let NlPayload::Ack(_) = ret.nl_payload {
                 if ret.nl_seq != *seq {
-                    todo!("seq not valid")
+                    return Err(NlError::BadSeq);
                 }
             } else {
-                todo!("Not an ack")
+                return Err(NlError::NoAck);
             }
             todo!()
         } else {
-            todo!("No ack returned")
+            return Err(NlError::NoAck);
         }
 
         *seq += 1;
@@ -336,13 +323,13 @@ impl RTNetlink {
 
             if let NlPayload::Ack(_) = ret.nl_payload {
                 if ret.nl_seq != *seq {
-                    todo!("seq not valid")
+                    return Err(NlError::BadSeq);
                 }
             } else {
-                todo!("Not an ack")
+                return Err(NlError::NoAck);
             }
         } else {
-            todo!("No ack returned")
+            return Err(NlError::NoAck);
         }
 
         *seq += 1;
@@ -365,25 +352,21 @@ impl RTNetlink {
             Nlmsghdr::new(len, nl_type, flag, seq, pid, NlPayload::Payload(ns))
         };
 
-        println!("sending");
         let socket = unsafe { &mut *self.handle.get() };
         socket.send(nlhdr)?;
-        println!("sent");
 
         if let Some(ret) = socket.recv()? {
             let ret: Nlmsghdr<NlTypeWrapper, Netns> = ret;
 
             if let NlPayload::Ack(_) = ret.nl_payload {
                 if ret.nl_seq != *seq {
-                    todo!("seq not valid")
+                    return Err(NlError::BadSeq);
                 }
-                return Ok(());
             } else {
-                todo!("Not an ack")
+                return Err(NlError::NoAck);
             }
-            todo!()
         } else {
-            todo!("No ack returned")
+            return Err(NlError::NoAck);
         }
 
         *seq += 1;
@@ -470,7 +453,7 @@ impl Interface {
     pub fn new_with_type(kind: &str) -> Result<Self, NlError> {
         let mut attrs = RtBuffer::new();
         let mut linkinfo = Rtattr::new(None, Ifla::Linkinfo, Vec::<u8>::new())?;
-        linkinfo.add_nested_attribute(&Rtattr::new(None, IflaInfo::Kind, kind)?);
+        linkinfo.add_nested_attribute(&Rtattr::new(None, IflaInfo::Kind, kind)?)?;
         attrs.push(linkinfo);
 
         let msg = Ifinfomsg::new(

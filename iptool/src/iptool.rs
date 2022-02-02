@@ -1,12 +1,11 @@
-use std::io::{Error, Result};
-use std::net::{IpAddr, Ipv4Addr};
+use std::io::Result;
+use std::net::Ipv4Addr;
 use std::os::unix::io::AsRawFd;
 
 #[cfg(target_family = "unix")]
 use std::os::unix::io::RawFd;
 #[cfg(target_family = "unix")]
 use std::os::unix::prelude::FromRawFd;
-use std::panic::RefUnwindSafe;
 
 use iptool_sys as ip_impl;
 

@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Result};
-use clap::{App, Arg, ArgMatches, ErrorKind};
+use clap::{App, Arg, ArgMatches};
 use iptool::links::LinkTool;
 use iptool::IpTool;
 use std::ffi::{CStr, CString};
@@ -62,7 +62,7 @@ fn list_links(sub_matches: &ArgMatches, has_name: bool) -> Result<()> {
     } else {
         None
     };
-    let mut tool = LinkTool::new()?;
+    let tool = LinkTool::new()?;
 
     let nsid = if has_name {
         if let Some(name) = sub_matches.value_of("netns") {
