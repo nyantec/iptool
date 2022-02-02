@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = "3.0.0-rc.7"
+clap = "3.0.7"
+anyhow = "1.0.52"
+nix = "0.23.1"
 
 iptool = { path = "../iptool", features = ["links"] }

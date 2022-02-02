@@ -2,6 +2,7 @@ use libc::wchar_t;
 use std::borrow::Cow;
 use std::io::Error;
 use std::io::Result as IoResult;
+use std::os::unix::io::RawFd;
 use std::sync::{Mutex, TryLockError};
 
 use log::warn;
@@ -11,7 +12,7 @@ use neli::consts::rtnl::{Arphrd, IffFlags, Ifla, IflaInfo, RtAddrFamily, RtaType
 use neli::consts::socket::NlFamily;
 use neli::err::{DeError, NlError};
 use neli::nl::{NlPayload, Nlmsghdr};
-use neli::rtnl::{Ifinfomsg, Rtattr};
+use neli::rtnl::{Ifinfomsg, Rtattr, Rtgenmsg};
 use neli::socket::NlSocketHandle;
 use neli::types::{Buffer, RtBuffer};
 use neli::{FromBytesWithInput, Header};
@@ -66,8 +67,77 @@ impl RTNetlink {
         }
     }
 
+    // -- Network Namspace --
+    pub fn get_nsid_fd(&self, fd: RawFd) -> Result<Option<i32>, NlError<NlTypeWrapper, Netns>> {
+        let mut seq = self
+            .seq
+            .lock()
+            .map_err(|_| Error::from_raw_os_error(libc::ENOTRECOVERABLE))?;
+
+        let mut attrs = RtBuffer::new();
+        //attrs.push(Rtattr::new(None, Ifla::NetNsFd, fd as u32)?);
+        attrs.push(Rtattr::new(None, NetNSA::FD, fd as u32)?);
+
+        let nlhdr = {
+            let len = None;
+            let nl_type = Rtm::Getnsid;
+            let flag = NlmFFlags::new(&[NlmF::Request]);
+            let seq = Some(*seq);
+            let pid = Some(Pid::this().as_raw() as _);
+            /*let payload = Ifinfomsg::new(
+                RtAddrFamily::Unspecified,
+                Arphrd::Netrom,
+                0,
+                IffFlags::new(&[]),
+                IffFlags::new(&[]),
+                attrs,
+            );
+            let payload = Netns {
+                rtgen_family: RtAddrFamily::Unspecified,
+                rtattrs: attrs,
+            };*/
+            let payload = Netns::new(RtAddrFamily::Unspecified, attrs);
+            use neli::Size;
+
+            Nlmsghdr::new(len, nl_type, flag, seq, pid, NlPayload::Payload(payload))
+        };
+
+        let socket = unsafe { &mut *self.handle.get() };
+        socket.send(nlhdr)?;
+
+        if let Some(ret) = socket.recv()? {
+            let ret: Nlmsghdr<NlTypeWrapper, Netns> = ret;
+
+            if ret.nl_seq != *seq {
+                warn!("Sequence not correct");
+                return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE).into());
+            }
+
+            let payload = match ret.nl_payload {
+                NlPayload::Payload(p) => p,
+                NlPayload::Err(e) => return Err(e.into()),
+                _ => return Err(Error::from_raw_os_error(libc::ENOTRECOVERABLE).into()),
+            };
+
+            let id = payload
+                .rtattrs
+                .get_attr_handle()
+                .get_attr_payload_as(NetNSA::NSid)?;
+
+            if id < 0 {
+                return Ok(None);
+            }
+            return Ok(Some(id));
+        }
+
+        todo!("no ack returned")
+    }
+
     // -- Interfaces --
-    pub fn get_interfaces(&self) -> Result<Vec<Interface>, NlError<NlTypeWrapper, Ifinfomsg>> {
+    pub fn get_interfaces(
+        &self,
+        nsid: Option<i32>,
+    ) -> Result<Vec<Interface>, NlError<NlTypeWrapper, Ifinfomsg>> {
         let mut seq = self
             .seq
             .lock()
@@ -75,6 +145,9 @@ impl RTNetlink {
 
         let mut attrs = RtBuffer::new();
         attrs.push(Rtattr::new(None, Ifla::ExtMask, 0x01000000u32)?);
+        if let Some(nsid) = nsid {
+            attrs.push(Rtattr::new(None, Ifla::IfNetnsid, nsid)?);
+        }
 
         let nlhdr = {
             let len = None;
@@ -125,7 +198,11 @@ impl RTNetlink {
         Ok(ret)
     }
 
-    pub fn get_interface(&self, dev: &str) -> Result<Interface, NlError<NlTypeWrapper, Ifinfomsg>> {
+    pub fn get_interface(
+        &self,
+        dev: &str,
+        nsid: Option<i32>,
+    ) -> Result<Interface, NlError<NlTypeWrapper, Ifinfomsg>> {
         let mut seq = self
             .seq
             .lock()
@@ -134,6 +211,9 @@ impl RTNetlink {
         let mut attrs = RtBuffer::new();
         attrs.push(Rtattr::new(None, Ifla::Ifname, dev)?);
         attrs.push(Rtattr::new(None, Ifla::ExtMask, 0x01000000u32)?);
+        if let Some(nsid) = nsid {
+            attrs.push(Rtattr::new(None, Ifla::IfNetnsid, nsid)?);
+        }
 
         let nlhdr = {
             let len = None;
@@ -223,6 +303,53 @@ impl RTNetlink {
         Ok(())
     }
 
+    pub fn delete_interface(
+        &self,
+        interface: Interface,
+    ) -> Result<(), NlError<NlTypeWrapper, Ifinfomsg>> {
+        let mut seq = self
+            .seq
+            .lock()
+            .map_err(|_| Error::from_raw_os_error(libc::ENOTRECOVERABLE))?;
+
+        let nlhdr = {
+            let len = None;
+            let nl_type = Rtm::Dellink;
+            let flag = NlmFFlags::new(&[NlmF::Request, NlmF::Ack, NlmF::Match, NlmF::Atomic]);
+            let seq = Some(*seq);
+            let pid = Some(Pid::this().as_raw() as _);
+            Nlmsghdr::new(
+                len,
+                nl_type,
+                flag,
+                seq,
+                pid,
+                NlPayload::Payload(interface.0),
+            )
+        };
+
+        let socket = unsafe { &mut *self.handle.get() };
+        socket.send(nlhdr)?;
+
+        if let Some(ret) = socket.recv()? {
+            let ret: Nlmsghdr<NlTypeWrapper, Ifinfomsg> = ret;
+
+            if let NlPayload::Ack(_) = ret.nl_payload {
+                if ret.nl_seq != *seq {
+                    todo!("seq not valid")
+                }
+            } else {
+                todo!("Not an ack")
+            }
+        } else {
+            todo!("No ack returned")
+        }
+
+        *seq += 1;
+
+        Ok(())
+    }
+
     pub fn create_nsid(&self, ns: Netns) -> Result<(), NlError<NlTypeWrapper, Netns>> {
         let mut seq = self
             .seq
@@ -270,23 +397,33 @@ use neli_proc_macros::{
     FromBytesWithInput as FromBytesWithInputGen, Header as HeaderGen, Size, ToBytes,
 };
 
-#[derive(Debug, Size, ToBytes, HeaderGen, FromBytesWithInputGen)]
+// TODO: wrong padding? message cannot be decoded again??
+#[derive(Debug, Size, ToBytes, Header, FromBytesWithInput)]
 pub struct Netns {
+    //pub rtgen_header: Rtgenmsg,
     pub rtgen_family: RtAddrFamily,
-    //padding: u8,
+    padding: u16,
+
+    padding2: u8,
     #[neli(input = "input.checked_sub(Self::header_size()).ok_or(DeError::UnexpectedEOB)?")]
     pub rtattrs: RtBuffer<NetNSA, Buffer>,
 }
 
 impl Netns {
+    pub fn new(rtgen_family: RtAddrFamily, rtattrs: RtBuffer<NetNSA, Buffer>) -> Self {
+        Self {
+            //rtgen_header: Rtgenmsg { rtgen_family },
+            rtgen_family,
+            rtattrs,
+            padding: 0,
+            padding2: 0,
+        }
+    }
+
     pub fn new_with_id(id: i32) -> Result<Self, NlError> {
         let mut attrs = RtBuffer::new();
         attrs.push(Rtattr::new(None, NetNSA::NSid, id)?);
-        Ok(Self {
-            rtgen_family: RtAddrFamily::Netlink,
-            //padding: 0,
-            rtattrs: attrs,
-        })
+        Ok(Self::new(RtAddrFamily::Netlink, attrs))
     }
 
     pub fn set_pid(&mut self, pid: u32) -> Result<(), NlError> {

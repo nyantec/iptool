@@ -6,6 +6,9 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 #[cfg(target_os = "linux")]
 mod linux;
 
+#[cfg(feature = "neli")]
+pub use neli;
+
 #[cfg(target_os = "linux")]
 pub use linux::{Ifreq, SIOCGIFINDEX};
 

@@ -5,15 +5,10 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-links = [ "iptool-sys/rtnetlink", "neli" ]
+links = [ "iptool-sys/rtnetlink" ]
 
 
 [dependencies]
 iptool-sys = { path = "../iptool-sys" }
 libc = "0.2" # TODO: only linux?
-
-[target.'cfg(target_os = "linux")'.dependencies]
-#neli = { version = "0.6", optional = true }
-#neli = { path = "../neli", optional = true }
-#neli = { git = "https://github.com/nyantec/neli", branch = "nyantec-fixes", optional = true }
-neli = { git = "https://github.com/jbaublitz/neli", branch = "issue-158", optional = true}
+nix = "0.23.1" # TODO: only unix?

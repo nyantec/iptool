@@ -1,25 +1,162 @@
-use std::io::Result;
-
-use clap::ArgMatches;
-use iptool::IpTool;
-
+use anyhow::{anyhow, bail, Result};
+use clap::{App, Arg, ArgMatches, ErrorKind};
 use iptool::links::LinkTool;
+use iptool::IpTool;
+use std::ffi::{CStr, CString};
+use std::path::PathBuf;
+
+// TODO: move to netns module
+pub(crate) const IP_NETNS_PATH: &'static str = "/var/run/netns";
+
+fn dev() -> Arg<'static> {
+    Arg::new("dev").long("dev").takes_value(true)
+}
+
+pub(crate) fn app() -> App<'static> {
+    App::new("link")
+        .about("Link management")
+        .alias("l")
+        .subcommand(
+            App::new("show")
+                .alias("s")
+                .about("Show links")
+                .arg(dev())
+                .arg(Arg::new("grep").long("grep").short('g').takes_value(true))
+                .arg(Arg::new("netns").long("netns").long("ns").takes_value(true)),
+        )
+        .subcommand(
+            App::new("set")
+                .about("Manage link")
+                .arg(dev().required(true))
+                .arg(Arg::new("state"))
+                .arg(Arg::new("mtu").long("mtu").takes_value(true)),
+        )
+        .subcommand(
+            App::new("delete")
+                .alias("d")
+                .about("Delete links")
+                .arg(dev().required(true)),
+        )
+        .subcommand(App::new("exec").arg(Arg::new("netns").takes_value(true).required(true)))
+}
 
 pub fn link(sub_matches: &ArgMatches) -> Result<()> {
     match sub_matches.subcommand() {
-        None => list_links(),
+        None => list_links(sub_matches, false),
+        Some(("show", matches)) => list_links(matches, true),
+        Some(("set", matches)) => set_link(matches),
+        Some(("delete", matches)) => del_link(matches),
+        Some(("exec", matches)) => exec(matches),
         _ => todo!(),
     }
 }
 
-fn list_links() -> Result<()> {
-    let tool = LinkTool::new()?;
+fn list_links(sub_matches: &ArgMatches, has_name: bool) -> Result<()> {
+    let dev = if has_name {
+        sub_matches.value_of("dev")
+    } else {
+        None
+    };
+    let grep = if has_name {
+        sub_matches.value_of("grep")
+    } else {
+        None
+    };
+    let mut tool = LinkTool::new()?;
 
-    let interfaces = tool.get_interfaces()?;
+    let nsid = if has_name {
+        if let Some(name) = sub_matches.value_of("netns") {
+            let mut path = PathBuf::from(IP_NETNS_PATH);
+            path.push(name);
 
-    for interface in interfaces {
+            let tool = unsafe { tool.get_inner() };
+            let id = tool
+                .get_nsid_path(&path)?
+                .ok_or_else(|| anyhow!("No registered network namespace found for {}", name))?;
+            Some(id)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    if let Some(dev) = dev {
+        //let interface = tool.get_interface(dev)?;
+        let interface = unsafe { tool.get_inner() }.get_interface_ns(dev, nsid)?;
         println!("{}", interface.print_info()?);
+    } else {
+        let interfaces = unsafe { tool.get_inner() }.get_interfaces_ns(nsid)?;
+        for interface in interfaces {
+            if let Some(grep) = grep {
+                if !interface.get_name().contains(grep) {
+                    continue;
+                }
+            }
+            println!("{}", interface.print_info()?);
+        }
     }
 
+    Ok(())
+}
+
+fn set_link(sub_matches: &ArgMatches) -> Result<()> {
+    let mut tool = IpTool::new()?;
+
+    let dev = sub_matches.value_of("dev").unwrap();
+    // state
+    sub_matches
+        .value_of("state")
+        .map(|state| set_link_state(&mut tool, dev, state))
+        .transpose()?;
+
+    // mtu
+    sub_matches
+        .value_of("mtu")
+        .map(|x| x.parse::<u32>().ok())
+        .flatten()
+        .map(|x| tool.set_mut(dev, x))
+        .transpose()?;
+
+    Ok(())
+}
+
+fn set_link_state(tool: &mut IpTool, dev: &str, state: &str) -> Result<()> {
+    let state = match state.to_lowercase().as_str() {
+        "up" => true,
+        "down" => false,
+        _ => bail!("Invalid state verb"),
+    };
+
+    tool.set_up(dev, state)?;
+
+    Ok(())
+}
+
+fn del_link(sub_matches: &ArgMatches) -> Result<()> {
+    let dev = sub_matches.value_of("dev").unwrap();
+
+    let mut tool = LinkTool::new()?;
+
+    tool.delete_interface(tool.get_interface(dev)?)?;
+
+    Ok(())
+}
+
+// TODO: move netns namespace
+fn exec(sub_matches: &ArgMatches) -> Result<()> {
+    let netns = sub_matches.value_of("netns").unwrap();
+
+    let mut tool = LinkTool::new()?;
+
+    println!("entering ns: {}", netns);
+    let mut path = PathBuf::from(IP_NETNS_PATH);
+    path.push(netns);
+    // SAFETY: execving own process, nothing depends on the current `unshare` state
+    unsafe { tool.enter_ns_path(&path) }?;
+
+    //nix::unistd::execv(CString::try_from("/bin/sh".to_owned())?.as_c_str(), &[]);
+    let bash = CString::new("/bin/sh")?;
+    nix::unistd::execv::<&CStr>(bash.as_c_str(), &[])?;
     Ok(())
 }

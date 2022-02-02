@@ -1,22 +1,35 @@
-use neli::consts::rtnl::{Arphrd, Ifla};
+use nix::fcntl::{self, OFlag};
 use std::any::Any;
+use std::ffi::CString;
 use std::io::{Error, ErrorKind, Result};
+use std::os::unix::io::RawFd;
+use std::path::{Path, PathBuf};
 
+use iptool_sys::neli::consts::rtnl::{Arphrd, Ifla};
+use iptool_sys::neli::err::NlError;
 use iptool_sys::RTNetlink;
 
 pub struct LinkTool {
     sys: RTNetlink,
+    netns_path: Option<PathBuf>,
 }
 
 impl LinkTool {
     pub fn new() -> Result<Self> {
         Ok(Self {
             sys: RTNetlink::new()?,
+            netns_path: None,
         })
     }
 
     pub fn get_interfaces(&self) -> Result<Vec<Interface>> {
-        let interfaces = self.sys.get_interfaces().map_err(|e| nl_error_to_io(e))?;
+        self.get_interfaces_ns(None)
+    }
+    pub fn get_interfaces_ns(&self, nsid: Option<i32>) -> Result<Vec<Interface>> {
+        let interfaces = self
+            .sys
+            .get_interfaces(nsid)
+            .map_err(|e| nl_error_to_io(e))?;
         let mut result = Vec::new();
 
         for interface in interfaces {
@@ -24,6 +37,61 @@ impl LinkTool {
         }
 
         Ok(result)
+    }
+
+    pub fn get_interface(&self, name: &str) -> Result<Interface> {
+        self.get_interface_ns(name, None)
+    }
+    pub fn get_interface_ns(&self, name: &str, nsid: Option<i32>) -> Result<Interface> {
+        self.sys
+            .get_interface(name, nsid)
+            .map_err(nl_error_to_io)
+            .map(Interface::try_from)?
+    }
+
+    pub fn setns_path<P: AsRef<Path>>(&mut self, path: &P) -> Result<()> {
+        let path = path.as_ref();
+        let file = path.to_str().unwrap();
+
+        use nix::sched;
+        let ns_file = fcntl::open(
+            file,
+            OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        )?;
+
+        sched::setns(ns_file, sched::CloneFlags::CLONE_NEWNET)?;
+
+        nix::unistd::close(ns_file)?;
+
+        sched::unshare(sched::CloneFlags::CLONE_NEWNS);
+
+        self.netns_path = Some(path.to_path_buf());
+
+        Ok(())
+    }
+
+    pub fn get_nsid_fd(&self, fd: RawFd) -> Result<Option<i32>> {
+        self.sys.get_nsid_fd(fd).map_err(nl_error_to_io)
+    }
+
+    pub fn get_nsid_path<P: AsRef<Path>>(&self, path: &P) -> Result<Option<i32>> {
+        let ns_file = fcntl::open(
+            path.as_ref(),
+            OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        )?;
+
+        let id = self.get_nsid_fd(ns_file)?;
+
+        nix::unistd::close(ns_file);
+        Ok(id)
+    }
+
+    pub fn delete_interface(&self, interface: Interface) -> Result<()> {
+        self.sys
+            .delete_interface(interface.interface)
+            .map_err(nl_error_to_io)
     }
 }
 
@@ -113,12 +181,18 @@ impl TryFrom<iptool_sys::Interface> for Interface {
 }
 
 use crate::IpTool;
-use neli::err::NlError;
 
 fn nl_error_to_io<T, P>(error: NlError<T, P>) -> Error {
     match error {
-        NlError::Nlmsgerr(e) => Error::from_raw_os_error(e.error),
-        _ => Error::from(ErrorKind::Other),
+        NlError::Nlmsgerr(e) => Error::from_raw_os_error(-e.error),
+        NlError::De(e) => {
+            eprint!("could not translate error: {}", e);
+            Error::from(ErrorKind::UnexpectedEof)
+        }
+        e => {
+            // FIXME: logger
+            Error::from(ErrorKind::Other)
+        }
     }
 }
 
