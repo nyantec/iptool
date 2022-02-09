@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use clap::{App, Arg, ArgMatches};
-use iptool::links::LinkTool;
+use iptool::links::{Interface, LinkTool};
 use iptool::IpTool;
 
 fn dev() -> Arg<'static> {
@@ -11,6 +11,20 @@ pub(crate) fn app() -> App<'static> {
     App::new("link")
         .about("Link management")
         .alias("l")
+        .subcommand(
+            App::new("add")
+                .alias("a")
+                .about("add links")
+                .arg(
+                    Arg::new("type")
+                        .long("type")
+                        .takes_value(true)
+                        .required(true),
+                )
+                .arg(Arg::new("name").long("name").short('n').takes_value(true))
+                .arg(Arg::new("mtu").long("mtu").takes_value(true))
+                .arg(Arg::new("txqueuelen").long("txqueuelen").takes_value(true)),
+        )
         .subcommand(
             App::new("show")
                 .alias("s")
@@ -48,11 +62,37 @@ pub(crate) fn app() -> App<'static> {
 pub fn link(sub_matches: &ArgMatches) -> Result<()> {
     match sub_matches.subcommand() {
         None => list_links(sub_matches, false),
+        Some(("add", matches)) => add_link(matches),
         Some(("show", matches)) => list_links(matches, true),
         Some(("set", matches)) => set_link(matches),
         Some(("delete", matches)) => del_link(matches),
         _ => todo!(),
     }
+}
+
+fn add_link(sub_matches: &ArgMatches) -> Result<()> {
+    let if_type = sub_matches.value_of("type").unwrap();
+
+    let mut interface = Interface::new(if_type)?;
+
+    if let Some(name) = sub_matches.value_of("name") {
+        interface.set_name(name.to_owned())?;
+    }
+
+    if let Some(mtu) = sub_matches.value_of("mtu") {
+        let mtu: u32 = mtu.parse()?;
+        interface.set_mtu(mtu)?;
+    }
+
+    if let Some(txqueuelen) = sub_matches.value_of("txqueuelen") {
+        let txqueuelen: u32 = txqueuelen.parse()?;
+        interface.set_txqlen(txqueuelen)?;
+    }
+
+    let mut tool = LinkTool::new()?;
+    tool.create_interface(interface)?;
+
+    Ok(())
 }
 
 fn list_links(sub_matches: &ArgMatches, has_name: bool) -> Result<()> {
@@ -89,7 +129,7 @@ fn list_links(sub_matches: &ArgMatches, has_name: bool) -> Result<()> {
         let interfaces = unsafe { tool.get_inner() }.get_interfaces_ns(nsid)?;
         for interface in interfaces {
             if let Some(grep) = grep {
-                if !interface.get_name().contains(grep) {
+                if !interface.get_name()?.contains(grep) {
                     continue;
                 }
             }

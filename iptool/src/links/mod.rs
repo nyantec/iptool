@@ -26,6 +26,10 @@ impl LinkTool {
         self.inner.setns_path(path)
     }
 
+    pub fn create_interface(&mut self, interface: Interface) -> Result<()> {
+        self.inner.create_interface(interface)
+    }
+
     pub fn get_interfaces(&self) -> Result<Vec<Interface>> {
         self.inner.get_interfaces()
     }

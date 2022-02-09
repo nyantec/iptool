@@ -268,6 +268,8 @@ impl RTNetlink {
             )
         };
 
+        *seq += 1;
+
         let socket = unsafe { &mut *self.handle.get() };
         socket.send(nlhdr)?;
 
@@ -275,18 +277,15 @@ impl RTNetlink {
             let ret: Nlmsghdr<NlTypeWrapper, Ifinfomsg> = ret;
 
             if let NlPayload::Ack(_) = ret.nl_payload {
-                if ret.nl_seq != *seq {
+                if ret.nl_seq != *seq - 1 {
                     return Err(NlError::BadSeq);
                 }
             } else {
                 return Err(NlError::NoAck);
             }
-            todo!()
         } else {
             return Err(NlError::NoAck);
         }
-
-        *seq += 1;
 
         Ok(())
     }
@@ -432,6 +431,7 @@ impl RTNetlink {
 use neli_proc_macros::{
     FromBytesWithInput as FromBytesWithInputGen, Header as HeaderGen, Size, ToBytes,
 };
+use nix::sys::socket::sockopt::ReuseAddr;
 
 // TODO: wrong padding? message cannot be decoded again??
 #[derive(Debug, Size, ToBytes, Header, FromBytesWithInput)]
@@ -497,6 +497,17 @@ pub enum NetNSA {
 impl RtaType for NetNSA {}
 
 // -- Interface --
+macro_rules! gen_set_if {
+    ($func:ident, $type:ident, $rta_type:ident) => {
+        pub fn $func(&mut self, $func: $type) -> Result<(), NlError> {
+            self.0
+                .rtattrs
+                .push(Rtattr::new(None, Ifla::$rta_type, $func)?);
+            Ok(())
+        }
+    };
+}
+
 #[derive(Debug)]
 pub struct Interface(pub Ifinfomsg);
 
@@ -541,6 +552,10 @@ impl Interface {
         let name = attr_handle.get_attr_payload_as_with_len::<String>(Ifla::Ifname)?;
         Ok(name)
     }
+
+    gen_set_if!(set_if_name, String, Ifname);
+    gen_set_if!(set_if_mtu, u32, Mtu);
+    gen_set_if!(set_if_txqlen, u32, Txqlen);
 }
 
 #[cfg(test)]

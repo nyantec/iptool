@@ -1,9 +1,11 @@
+use libc::{c_uint, wchar_t};
 use nix::fcntl::{self, OFlag};
+use std::borrow::Cow;
 use std::io::{Error, ErrorKind, Result};
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 
-use iptool_sys::neli::consts::rtnl::{Arphrd, Ifla};
+use iptool_sys::neli::consts::rtnl::{Arphrd, Iff, IffFlags, Ifla};
 use iptool_sys::neli::err::NlError;
 use iptool_sys::RTNetlink;
 
@@ -18,6 +20,12 @@ impl LinkTool {
             sys: RTNetlink::new()?,
             netns_path: None,
         })
+    }
+
+    pub fn create_interface(&mut self, interface: Interface) -> Result<()> {
+        self.sys
+            .create_interface(interface.interface)
+            .map_err(nl_error_to_io)
     }
 
     pub fn get_interfaces(&self) -> Result<Vec<Interface>> {
@@ -116,19 +124,35 @@ impl LinkTool {
 
 #[derive(Debug)]
 pub struct Interface {
-    name: String,
-    interface: iptool_sys::Interface,
+    pub interface: iptool_sys::Interface,
+}
+
+macro_rules! gen_set_if_linux {
+    ($func:ident, $inner_func:ident, $arg:ident, $type:ident) => {
+        #[cfg(target_os = "linux")]
+        pub fn $func(&mut self, $arg: $type) -> Result<()> {
+            self.interface.$inner_func($arg).map_err(nl_error_to_io)
+        }
+    };
 }
 
 impl Interface {
-    // TODO: Result<String>?
-    pub fn get_name(&self) -> &str {
-        &self.name
+    pub fn new(if_type: &str) -> Result<Self> {
+        let interface = iptool_sys::Interface::new_with_type(if_type).map_err(nl_error_to_io)?;
+        Ok(Self { interface })
     }
+
+    pub fn get_name(&self) -> Result<String> {
+        self.interface.get_if_name().map_err(|e| nl_error_to_io(e))
+    }
+
+    gen_set_if_linux!(set_name, set_if_name, name, String);
+    gen_set_if_linux!(set_mtu, set_if_mtu, mtu, u32);
+    gen_set_if_linux!(set_txqlen, set_if_txqlen, txqlen, u32);
 
     pub fn print_info(&self) -> Result<String> {
         let index = self.interface.0.ifi_index;
-        let name = self.get_name();
+        let name = self.get_name()?;
 
         let handle = self.interface.get_attr_handle();
         let mut attrs = Vec::new();
@@ -178,14 +202,76 @@ impl Interface {
             addresses.push(format!("link-netns {}", netns));
         }
 
+        let flags = self.flags_str();
+
         Ok(format!(
-            "{index}: {name}: <FOO> {attrs}\n    link/{link_type} {address}",
+            "{index}: {name}: <{flags}> {attrs}\n    link/{link_type} {address}",
             index = index,
             name = name,
             attrs = attrs.join(" "),
             link_type = link_type,
-            address = addresses.join(" ")
+            address = addresses.join(" "),
+            flags = flags
         ))
+    }
+
+    const PRINTABLE_FLAGS: &'static [Iff] = &[
+        Iff::Loopback,
+        Iff::Broadcast,
+        Iff::Pointopoint,
+        Iff::Multicast,
+        Iff::Noarp,
+        Iff::Allmulti,
+        Iff::Promisc,
+        Iff::Master,
+        Iff::Slave,
+        Iff::Debug,
+        Iff::Dynamic,
+        Iff::Automedia,
+        Iff::Portsel,
+        Iff::Notrailers,
+        Iff::Up,
+        Iff::LowerUp,
+        Iff::Dormant,
+        Iff::Echo,
+    ];
+
+    fn flags_str(&self) -> String {
+        let mut ret = Vec::new();
+
+        for flag in Self::PRINTABLE_FLAGS {
+            if self.interface.0.ifi_flags.contains(flag) {
+                ret.push(Self::print_flag_name(flag))
+            }
+        }
+
+        // TODO: add M-DOWN flag
+
+        ret.join(",")
+    }
+
+    const fn print_flag_name(flag: &Iff) -> &'static str {
+        match flag {
+            Iff::Loopback => "LOOPBACK",
+            Iff::Broadcast => "BROADCAST",
+            Iff::Pointopoint => "POINTOPOINT",
+            Iff::Multicast => "MULTICAST",
+            Iff::Noarp => "NOARP",
+            Iff::Allmulti => "ALLMULTI",
+            Iff::Promisc => "PROMISC",
+            Iff::Master => "MASTER",
+            Iff::Slave => "SLAVE",
+            Iff::Debug => "DEBUG",
+            Iff::Dynamic => "DYNAMIC",
+            Iff::Automedia => "AUTOMEDIA",
+            Iff::Portsel => "PORTSEL",
+            Iff::Notrailers => "NOTRAILERS",
+            Iff::Up => "UP",
+            Iff::LowerUp => "LOWER_UP",
+            Iff::Dormant => "DORMANT",
+            Iff::Echo => "ECHO",
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -193,9 +279,9 @@ impl TryFrom<iptool_sys::Interface> for Interface {
     type Error = Error;
 
     fn try_from(interface: iptool_sys::Interface) -> std::result::Result<Self, Self::Error> {
-        let name = interface.get_if_name().map_err(|e| nl_error_to_io(e))?;
+        //let name = interface.get_if_name().map_err(|e| nl_error_to_io(e))?;
 
-        Ok(Self { name, interface })
+        Ok(Self { interface })
     }
 }
 
