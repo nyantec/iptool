@@ -1,3 +1,4 @@
+use libc::{c_int, c_uint};
 use std::io::Error;
 use std::io::Result as IoResult;
 use std::os::unix::io::RawFd;
@@ -286,6 +287,58 @@ impl RTNetlink {
         }
 
         *seq += 1;
+
+        Ok(())
+    }
+
+    pub fn set_interface_ns_fd(
+        &self,
+        dev: c_uint,
+        fd: RawFd,
+    ) -> Result<(), NlError<NlTypeWrapper, Ifinfomsg>> {
+        let mut seq = self
+            .seq
+            .lock()
+            .map_err(|_| Error::from_raw_os_error(libc::ENOTRECOVERABLE))?;
+
+        let mut attrs = RtBuffer::new();
+        attrs.push(Rtattr::new(None, Ifla::NetNsFd, fd)?);
+
+        let nlhdr = {
+            let len = None;
+            let nl_type = Rtm::Newlink;
+            let flag = NlmFFlags::new(&[NlmF::Request, NlmF::Ack]);
+            let seq = Some(*seq);
+            let pid = Some(Pid::this().as_raw() as _);
+            let payload = Ifinfomsg::new(
+                RtAddrFamily::Unspecified,
+                Arphrd::Netrom,
+                dev as c_int,
+                IffFlags::new(&[]),
+                IffFlags::new(&[]),
+                attrs,
+            );
+            Nlmsghdr::new(len, nl_type, flag, seq, pid, NlPayload::Payload(payload))
+        };
+
+        *seq += 1;
+
+        let socket = unsafe { &mut *self.handle.get() };
+        socket.send(nlhdr)?;
+
+        if let Some(ret) = socket.recv()? {
+            let ret: Nlmsghdr<NlTypeWrapper, Ifinfomsg> = ret;
+
+            if let NlPayload::Ack(_) = ret.nl_payload {
+                if ret.nl_seq != *seq - 1 {
+                    return Err(NlError::BadSeq);
+                }
+            } else {
+                return Err(NlError::NoAck);
+            }
+        } else {
+            return Err(NlError::NoAck);
+        }
 
         Ok(())
     }

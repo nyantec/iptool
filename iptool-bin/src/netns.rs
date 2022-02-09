@@ -38,7 +38,7 @@ fn exec(sub_matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
-// TODO: check if name is an absolute path, and use it
+// TODO: check if name is an absolute path or an nsid number, and use it
 pub fn get_named_nsid(tool: &LinkTool, name: &str) -> Result<Option<i32>> {
     let mut path = PathBuf::from(IP_NETNS_PATH);
     path.push(name);

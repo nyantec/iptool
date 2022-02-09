@@ -47,6 +47,27 @@ impl LinkTool {
             .map(Interface::try_from)?
     }
 
+    pub fn set_interface_ns_path<P: AsRef<Path>>(&mut self, dev: &str, path: &P) -> Result<()> {
+        let path = path.as_ref();
+        let file = path.to_str().unwrap();
+
+        use nix::sched;
+        let ns_file = fcntl::open(
+            file,
+            OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        )?;
+
+        let ifidx = nix::net::if_::if_nametoindex(dev)?;
+
+        self.sys
+            .set_interface_ns_fd(ifidx, ns_file)
+            .map_err(nl_error_to_io)?;
+
+        nix::unistd::close(ns_file)?;
+        Ok(())
+    }
+
     pub fn setns_path<P: AsRef<Path>>(&mut self, path: &P) -> Result<()> {
         let path = path.as_ref();
         let file = path.to_str().unwrap();

@@ -29,7 +29,13 @@ pub(crate) fn app() -> App<'static> {
                 .about("Manage link")
                 .arg(dev().required(true))
                 .arg(Arg::new("state"))
-                .arg(Arg::new("mtu").long("mtu").takes_value(true)),
+                .arg(Arg::new("mtu").long("mtu").takes_value(true))
+                .arg(
+                    Arg::new("netns")
+                        .long("netns")
+                        .alias("ns")
+                        .takes_value(true),
+                ),
         )
         .subcommand(
             App::new("delete")
@@ -96,8 +102,16 @@ fn list_links(sub_matches: &ArgMatches, has_name: bool) -> Result<()> {
 
 fn set_link(sub_matches: &ArgMatches) -> Result<()> {
     let mut tool = IpTool::new()?;
+    let mut link = LinkTool::new()?;
 
     let dev = sub_matches.value_of("dev").unwrap();
+
+    // netns
+    sub_matches
+        .value_of("netns")
+        .map(|ns| set_link_netns(&mut link, dev, ns))
+        .transpose()?;
+
     // state
     sub_matches
         .value_of("state")
@@ -123,6 +137,16 @@ fn set_link_state(tool: &mut IpTool, dev: &str, state: &str) -> Result<()> {
     };
 
     tool.set_up(dev, state)?;
+
+    Ok(())
+}
+
+fn set_link_netns(tool: &mut LinkTool, dev: &str, ns: &str) -> Result<()> {
+    // check if ns is a valid nsid and use directly without fd
+    let mut path = std::path::PathBuf::from(crate::netns::IP_NETNS_PATH);
+    path.push(ns);
+
+    unsafe { tool.get_inner_mut() }.set_interface_ns_path(dev, &path)?;
 
     Ok(())
 }
